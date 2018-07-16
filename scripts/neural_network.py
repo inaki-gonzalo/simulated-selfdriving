@@ -1,67 +1,15 @@
 import pymorse
-
-import socket
-from PIL import Image
-from base64 import decodestring
-import ast
-import time 
+import Interface
 import numpy as np
 from keras.models import load_model
 
 MODEL_FILENAME='model.h5'
 HOST = "localhost"
-VIDEO_PORT = 60000 
-VELOCITIES_PORT = 60003
-POSE_PORT = 60002
 INTERFACE_PORT = 4000
-TCP_BUFF_SIZE=4096
+LINEAR_SPEED=3 #m/s
 
-
-#Open TCP sockect to communicate with Morse sim
-def open_socket(PORT):
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.connect((HOST, PORT))
-	return s
-	
-#Get screenshot from Morse sim	
-def get_image():
-	s=open_socket(VIDEO_PORT)
-	buf=""
-	done=False
-	while not done:
-			tmp=s.recv(TCP_BUFF_SIZE).decode("utf-8")
-			buf+=tmp
-			if '}' in tmp:
-				done=True
-	obj_pic=ast.literal_eval(buf)
-	s.close()
-	return obj_pic
-	
-#Get current position of joystick. 	
-def get_joystick_horizontal_axis():
-	s=open_socket(INTERFACE_PORT)
-	s.send(b'id1 atrv.joy get_local_data\n')
-	buf=""
-	done=False
-	while not done:
-			tmp=s.recv(TCP_BUFF_SIZE).decode("utf-8")
-			buf+=tmp
-			print(tmp)
-			if '}' in tmp:
-				done=True
-	obj=ast.literal_eval(buf[len("id1 SUCCESS "):])
-	s.close()
-	return obj['horizontal_axis']
-	
-#Transform image to numpy multi-dimensional array	
-def image_to_array(obj_pic):
-	img_data=obj_pic['image']
-	image = Image.frombytes('RGBA',(obj_pic['width'],obj_pic['height']),decodestring(img_data.encode("utf-8")))
-	return np.array(image)
-
-x_train=[]
-y_train=[]
-
+i=Interface.Interface(HOST,INTERFACE_PORT)
+c=Interface.Convert()
 model = load_model(MODEL_FILENAME)
 
 with pymorse.Morse(HOST, INTERFACE_PORT) as simu:
@@ -71,14 +19,14 @@ with pymorse.Morse(HOST, INTERFACE_PORT) as simu:
 			
 			motion = simu.atrv.motion
 			#Get current screenshot and transform it into a numpy array.
-			arr=image_to_array(get_image())
+			arr=c.image_to_4d_array(i.get_image())
 			
 			#Get an angle prediction from Neural network using current screenshot as input.
-			desired_angle=model.predict(np.resize(arr,(1,256,256,4)), batch_size=None,steps=1)
+			desired_angle=model.predict(arr, batch_size=None,steps=1)
 			print("Neural network Output: "+str(desired_angle))
 			
 			#Send command to simulated robot
-			motion.publish({"v": 3, "w": float(desired_angle[0][0])})
+			motion.publish({"v": LINEAR_SPEED, "w": float(desired_angle[0][0])})
 
 			simu.sleep(0.1)
 
